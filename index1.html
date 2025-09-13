@@ -17,48 +17,20 @@
   </script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  <!-- Firebase -->
-  <script type="module">
-    // Import Firebase SDKs
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-    // 🔹 Replace with your actual Firebase config
-    const firebaseConfig = {
-      apiKey: "AIzaSyBLZjJRBVbZMvrVljBwma65PWdpysmltpk", 
-      authDomain: "webapp-fc84b.firebaseapp.com",
-      projectId: "webapp-fc84b",
-      storageBucket: "webapp-fc84b.appspot.com",
-      messagingSenderId: "341307639010",
-      appId: "AIzaSyBLZjJRBVbZMvrVljBwma65PWdpysmltpk" 
-      
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const dbFirestore = getFirestore(app);
-
-    // Expose Firestore functions globally
-    window.dbFirestore = dbFirestore;
-    window.firebaseCollection = collection;
-    window.firebaseGetDocs = getDocs;
-    window.firebaseSetDoc = setDoc;
-    window.firebaseDoc = doc;
-    window.firebaseDeleteDoc = deleteDoc;
-    window.firebaseUpdateDoc = updateDoc;
-    window.firebaseOnSnapshot = onSnapshot;
-  </script>
-
   <style>
     html,body {height:100%}
     body {font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color: #e2e8f0;}
     .link {color:#a78bfa}
+    /* Dark theme card style */
     .card { @apply bg-slate-900/80 backdrop-blur-xl shadow-2xl rounded-3xl p-6 border border-slate-700 transition-all duration-300 hover:shadow-glow; }
+    /* Dark theme button styles */
     .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 font-semibold transition-all duration-300 active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-brand/50; }
     .btn-primary { @apply btn bg-brand text-white hover:bg-brand-dark shadow-xl; }
     .btn-ghost { @apply btn bg-transparent hover:bg-white/10 text-slate-200; }
     .input { @apply w-full rounded-xl border border-slate-700 bg-slate-800 text-white px-4 py-3 outline-none transition focus:ring-2 focus:ring-brand; }
+    /* New badge style for dark theme */
     .badge { @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold; background-color: #334155; color: #cbd5e1; border: 1px solid #475569; }
+    /* Animation and effect updates */
     .fade-in { animation: fade .5s ease-out both }
     @keyframes fade { from {opacity:0; transform:translateY(12px)} to {opacity:1; transform:none} }
     .glow-text { text-shadow: 0 0 10px rgba(167,139,250,0.5), 0 0 20px rgba(167,139,250,0.3); }
@@ -121,154 +93,73 @@
   }
 
   // --------------------
-  // Data Models (local caches, populated/synced with Firestore)
+  // Storage & Models
   // --------------------
-  // Note: session still uses localStorage, but users and events now sync with Firestore
+  const DB_KEY = 'eventhub_db_v1';
+  const USERS_KEY = 'eventhub_users_v1';
   const SESSION_KEY = 'eventhub_session_v1';
-  function loadLocal(key, fallback){ try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
-  function saveLocal(key, value){ localStorage.setItem(key, JSON.stringify(value)) }
 
-  const db = { events: [] }; // Events will be loaded from Firestore
-  let users = []; // Users will be loaded from Firestore
-  let session = loadLocal(SESSION_KEY, null); // Session remains local for simplicity
+  function load(key, fallback){ try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
+  function save(key, value){ localStorage.setItem(key, JSON.stringify(value)) }
 
+  const db = {
+    // {..., participants:[{..., teamName, details:[{name,phone,collegeName,email}]}]}
+    events: load(DB_KEY, []),
+  }
+  const users = load(USERS_KEY, []); // {email, password, role, name, clubName}
+  let session = load(SESSION_KEY, null); // {email, role, name}
   let registrationData = {}; // Temp storage for multi-step registration
+
+  function persist(){ save(DB_KEY, db.events); save(USERS_KEY, users); save(SESSION_KEY, session) }
 
   function uid(){ return crypto.randomUUID ? crypto.randomUUID() : (Date.now()+""+Math.random()).replace('.','') }
 
-  // --------------------
-  // Firestore Integration Functions
-  // --------------------
-
-  // Fetches all events from Firestore and updates the local db.events array
-  async function loadEventsFromFirestore() {
-    if (!window.dbFirestore) return;
-    try {
-      const eventsCol = window.firebaseCollection(window.dbFirestore, "events");
-      const querySnap = await window.firebaseGetDocs(eventsCol);
-      db.events = []; // Clear local events
-      querySnap.forEach(doc => db.events.push(doc.data()));
-      render(); // Re-render after loading data
-    } catch (error) {
-      console.error("Error loading events from Firestore:", error);
-      setToast("Failed to load events.", false);
-    }
-  }
-
-  // Fetches all users from Firestore and updates the local users array
-  async function loadUsersFromFirestore() {
-    if (!window.dbFirestore) return;
-    try {
-      const usersCol = window.firebaseCollection(window.dbFirestore, "users");
-      const querySnap = await window.firebaseGetDocs(usersCol);
-      users = []; // Clear local users
-      querySnap.forEach(doc => users.push(doc.data()));
-    } catch (error) {
-      console.error("Error loading users from Firestore:", error);
-      setToast("Failed to load users.", false);
-    }
-  }
-
-  // Seeds data if collections are empty (for first run demo)
-  async function seedFirestoreData() {
-    if (!window.dbFirestore) return;
-
-    // Check if users collection is empty
-    const usersCol = window.firebaseCollection(window.dbFirestore, "users");
-    const usersSnap = await window.firebaseGetDocs(usersCol);
-    if (usersSnap.empty) {
-      const organiserUser = { email:'organiser@example.com', password:'organiser123', role:'organiser', name:'Demo Organiser', clubName: 'Tech Club' };
-      const studentUser = { email:'student@example.com', password:'student123', role:'student', name:'Demo Student' };
-      await window.firebaseSetDoc(window.firebaseDoc(usersCol, organiserUser.email), organiserUser);
-      await window.firebaseSetDoc(window.firebaseDoc(usersCol, studentUser.email), studentUser);
-      console.log("Seeded demo users.");
-    }
-
-    // Check if events collection is empty
-    const eventsCol = window.firebaseCollection(window.dbFirestore, "events");
-    const eventsSnap = await window.firebaseGetDocs(eventsCol);
-    if (eventsSnap.empty) {
-      const eId = uid();
-      const demoEvent = {
-        id:eId,
-        title:'AI & Robotics Expo',
-        description:'Showcase of cutting-edge student projects in AI and robotics.',
-        category:'Tech',
-        date_time:new Date(Date.now()+86400000).toISOString(),
-        venue:'Main Auditorium',
-        max:120,
-        team_max: 4,
-        price: 250,
-        organiser_email:'organiser@example.com',
-        is_published:true,
-        announcement: 'The event schedule has been updated. Please check the main board for details.',
-        participants:[],
-        created_at:new Date().toISOString(),
-        updated_at:new Date().toISOString(),
-      };
-      await window.firebaseSetDoc(window.firebaseDoc(eventsCol, eId), demoEvent);
-      console.log("Seeded demo event.");
-    }
-  }
-
-  function load(collection, callback) {
-    // Realtime listener
-    return window.firebaseCollection(window.dbFirestore, collection).onSnapshot(snapshot => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Update localStorage for offline support
-      localStorage.setItem(collection, JSON.stringify(data));
-      // Send back to your UI
-      if (callback) callback(data);
+  // Seed a demo organiser and sample event (first run)
+  if(users.length === 0){
+    users.push({ email:'organiser@example.com', password:'organiser123', role:'organiser', name:'Demo Organiser', clubName: 'Tech Club' });
+    users.push({ email:'student@example.com', password:'student123', role:'student', name:'Demo Student' });
+    const eId = uid();
+    db.events.push({
+      id:eId,
+      title:'AI & Robotics Expo',
+      description:'Showcase of cutting-edge student projects in AI and robotics.',
+      category:'Tech',
+      date_time:new Date(Date.now()+86400000).toISOString(),
+      venue:'Main Auditorium',
+      max:120,
+      team_max: 4,
+      price: 250,
+      organiser_email:'organiser@example.com',
+      is_published:true,
+      announcement: 'The event schedule has been updated. Please check the main board for details.',
+      participants:[],
+      created_at:new Date().toISOString(),
+      updated_at:new Date().toISOString(),
     });
+    persist();
   }
-
-
-
 
   // --------------------
-  // Auth (Custom using Firestore 'users' collection)
+  // Auth
   // --------------------
-  async function signUp({email,password,role,name,clubName}){
-    if (users.find(u => u.email === email)) throw new Error('Email already registered');
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Invalid email');
-    if (password.length < 6) throw new Error('Password must be 6+ chars');
-
-    const newUser = { email, password, role, name: name || '', clubName: clubName || null };
-    try {
-      await window.firebaseSetDoc(window.firebaseDoc(window.firebaseCollection(window.dbFirestore, "users"), email), newUser);
-      users.push(newUser); // Update local cache
-      session = { email, role, name: name || email.split('@')[0] };
-      saveLocal(SESSION_KEY, session);
-      return session;
-    } catch (error) {
-      console.error("Error signing up:", error);
-      throw new Error("Failed to create account. Please try again.");
-    }
+  function signUp({email,password,role,name,clubName}){
+    if(users.find(u=>u.email===email)) throw new Error('Email already registered');
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Invalid email');
+    if(password.length<6) throw new Error('Password must be 6+ chars');
+    const newUser = {email, password, role, name:name||'', clubName: clubName||null};
+    users.push(newUser);
+    session = {email, role, name:name||email.split('@')[0]};
+    persist();
+    return session;
   }
-
-  async function signIn({email,password}){
-    try {
-      const userDocRef = window.firebaseDoc(window.firebaseCollection(window.dbFirestore, "users"), email);
-      const userSnap = await window.firebaseGetDocs(userDocRef); // Use getDocs for a specific doc
-      const u = userSnap.data(); // Get the document data
-
-      if (!u || u.password !== password) throw new Error('Invalid credentials');
-
-      session = { email: u.email, role: u.role, name: u.name || u.email.split('@')[0] };
-      saveLocal(SESSION_KEY, session);
-      return session;
-    } catch (error) {
-      console.error("Error signing in:", error);
-      throw new Error(error.message || "Failed to sign in. Please try again.");
-    }
+  function signIn({email,password}){
+    const u = users.find(u=>u.email===email && u.password===password);
+    if(!u) throw new Error('Invalid credentials');
+    session = {email:u.email, role:u.role, name:u.name||u.email.split('@')[0]};
+    persist();
+    return session;
   }
-
-  function signOut(){
-    session=null;
-    saveLocal(SESSION_KEY, session);
-    renderHeader();
-    navigate('#/');
-  }
+  function signOut(){ session=null; persist(); renderHeader(); navigate('#/') }
 
   function requireAuth(role){
     if(!session){ navigate('#/login'); setToast('Please login/register first', false); return false }
@@ -370,7 +261,7 @@
   // --------------------
   // Login & Register (separate pages)
   // --------------------
-  window.onLogin = async function(){
+  window.onLogin = function(){
     try {
       const email = $('#li_email').value.trim();
       const password = $('#li_password').value;
@@ -378,13 +269,13 @@
         setToast('All fields are required', false);
         return;
       }
-      await signIn({email,password});
+      signIn({email,password});
       setToast('Welcome back!');
       renderHeader();
       navigate('#/dashboard');
     } catch(err){ setToast(err.message, false) }
   }
-  window.onRegister = async function(role){
+  window.onRegister = function(role){
     try {
       const name = $('#su_name').value.trim();
       const email = $('#su_email').value.trim();
@@ -407,7 +298,7 @@
         signUpData.clubName = clubName;
       }
 
-      await signUp(signUpData);
+      signUp(signUpData);
       setToast('Account created!');
       renderHeader();
       if(role==='organiser') navigate('#/dashboard'); else navigate('#/');
@@ -435,7 +326,7 @@
         <h2 class="text-3xl font-black text-center">Create your Student Account</h2>
         <p class="text-slate-400 text-center mt-2">Join <b class="glow-text">Eventx</b> to attend events.</p>
         <div class="mt-6 space-y-4">
-          ${field('su_name','Your Name')}
+          ${field('su_name','Name')}
           ${field('su_email','Email','email')}
           ${field('su_password','Password (6+ chars)','password')}
           <button class="btn btn-primary w-full mt-4" onclick="onRegister('student')">Create Account</button>
@@ -656,7 +547,7 @@
   }
 
   // Registration Wizard Step 4: Confirmation
-  window.mockPay = async function(eventId, method){
+  window.mockPay = function(eventId, method){
     const e = db.events.find(x=>x.id===eventId);
     const { primaryName, qty, amount, participants, teamName } = registrationData;
     
@@ -670,21 +561,9 @@
       details: participants
     };
     
-    e.participants.push(reg); // Add to local cache first
+    e.participants.push(reg);
     e.updated_at = new Date().toISOString();
-
-    try {
-      // Update the event document in Firestore
-      await window.firebaseUpdateDoc(window.firebaseDoc(window.dbFirestore, "events", eventId), {
-        participants: e.participants,
-        updated_at: e.updated_at
-      });
-      console.log("Event participants updated in Firestore.");
-    } catch (error) {
-      console.error("Error updating event participants in Firestore:", error);
-      setToast("Failed to register. Please try again.", false);
-      return;
-    }
+    persist();
 
     view.innerHTML = `
       <div class="max-w-lg mx-auto card text-center fade-in">
@@ -806,25 +685,15 @@
     dlg.addEventListener('close', ()=> dlg.remove());
   }
   
-  window.saveAnnouncement = async function(id) {
+  window.saveAnnouncement = function(id) {
     const e = db.events.find(x=>x.id===id);
-    const newAnnouncement = $('#announcement_text').value.trim();
-    
-    try {
-      await window.firebaseUpdateDoc(window.firebaseDoc(window.dbFirestore, "events", id), {
-        announcement: newAnnouncement
-      });
-      e.announcement = newAnnouncement; // Update local cache
-      setToast('Announcement published');
-    } catch (error) {
-      console.error("Error saving announcement:", error);
-      setToast("Failed to publish announcement.", false);
-    } finally {
-      $('#announceModal')?.close();
-    }
+    e.announcement = $('#announcement_text').value.trim();
+    persist();
+    $('#announceModal')?.close();
+    setToast('Announcement published');
   }
 
-  window.saveEvent = async function(id){
+  window.saveEvent = function(id){
     const title = $('#ev_title').value.trim();
     const category = $('#ev_category').value.trim();
     const date_time = $('#ev_date').value;
@@ -841,54 +710,17 @@
 
     const eventData = {title,category,date_time:new Date(date_time).toISOString(),venue,max,team_max,price,description,updated_at:new Date().toISOString()};
     
-    try {
-      if(id){
-        await window.firebaseUpdateDoc(window.firebaseDoc(window.dbFirestore, "events", id), eventData);
-        // Update local cache
-        Object.assign(db.events.find(x=>x.id===id), eventData);
-        setToast('Event updated');
-      } else {
-        const newId = uid();
-        const newEvent = { ...eventData, id: newId, organiser_email: session.email, is_published: false, announcement: '', participants: [], created_at: new Date().toISOString() };
-        await window.firebaseSetDoc(window.firebaseDoc(window.dbFirestore, "events", newId), newEvent);
-        db.events.push(newEvent); // Add to local cache
-        setToast('Event created');
-      }
-      $('#eventModal').close();
-      render();
-    } catch (error) {
-      console.error("Error saving event:", error);
-      setToast("Failed to save event.", false);
+    if(id){
+      const e = db.events.find(x=>x.id===id);
+      Object.assign(e, eventData);
+    } else {
+      db.events.push({ ...eventData, id:uid(), organiser_email: session.email, is_published:false, announcement: '', participants:[], created_at:new Date().toISOString() });
     }
+    persist(); $('#eventModal').close(); setToast('Event saved'); render();
   }
 
-  window.togglePublish = async function(id){
-    const e = db.events.find(x=>x.id===id);
-    if (!e) return;
-    const newPublishStatus = !e.is_published;
-    try {
-      await window.firebaseUpdateDoc(window.firebaseDoc(window.dbFirestore, "events", id), { is_published: newPublishStatus });
-      e.is_published = newPublishStatus; // Update local cache
-      render();
-      setToast(newPublishStatus ? 'Event published!' : 'Event unpublished.');
-    } catch (error) {
-      console.error("Error toggling publish status:", error);
-      setToast("Failed to change publish status.", false);
-    }
-  }
-
-  window.deleteEvent = async function(id){
-    if(!confirm('Are you sure?')) return;
-    try {
-      await window.firebaseDeleteDoc(window.firebaseDoc(window.dbFirestore, "events", id));
-      db.events.splice(db.events.findIndex(x=>x.id===id),1); // Update local cache
-      render();
-      setToast('Event deleted.');
-    } catch (error) {
-      console.error("Error deleting event:", error);
-      setToast("Failed to delete event.", false);
-    }
-  }
+  window.togglePublish = function(id){ const e = db.events.find(x=>x.id===id); e.is_published = !e.is_published; persist(); render(); setToast(e.is_published?'Event published!':'Event unpublished.'); }
+  window.deleteEvent = function(id){ if(!confirm('Are you sure?')) return; db.events.splice(db.events.findIndex(x=>x.id===id),1); persist(); render(); setToast('Event deleted.'); }
 
   // Participants view & export
   window.openParticipants = function(id){
@@ -921,7 +753,7 @@
         "Primary Contact": p.name,
         "Registered By (Email)": p.user_email,
         "Payment Status": p.paid ? 'Paid' : 'Unpaid',
-        "Total Amount Paid": i === 0 ? p.amount : 0, // Only show total amount for the first participant in a team
+        "Total Amount Paid": i === 0 ? p.amount : 0,
         "Registered At": new Date(p.created_at).toLocaleString(),
         "Transaction ID": p.id
       })) : []
@@ -980,18 +812,6 @@
 
   // Init
   $('#year').textContent = new Date().getFullYear();
-  // Initialize Firestore data and then render
-  async function initializeApp() {
-    await seedFirestoreData(); // Ensure base data exists
-    await loadUsersFromFirestore(); // Load users into local cache
-    // Set up realtime sync for events
-    load("events", events => {
-      db.events = events;
-      render();
-    });
-  }
-  initializeApp();
-  </script>
-</body>
+  render();
+  </script></body>
 </html>
-<!DOCTYPE html>
