@@ -22,7 +22,7 @@
   <script type="module">
     // Import Firebase SDKs
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     // 🔹 Replace with your actual Firebase config
     const firebaseConfig = {
@@ -46,6 +46,7 @@
     window.firebaseDoc = doc;
     window.firebaseDeleteDoc = deleteDoc;
     window.firebaseUpdateDoc = updateDoc;
+    window.firebaseOnSnapshot = onSnapshot;
   </script>
 
   <style>
@@ -996,7 +997,11 @@
   async function initializeApp() {
     await seedFirestoreData(); // Ensure base data exists
     await loadUsersFromFirestore(); // Load users into local cache
-    await loadEventsFromFirestore(); // Load events into local cache and trigger initial render
+    // Set up realtime sync for events
+    load("events", events => {
+      db.events = events;
+      render();
+    });
   }
   initializeApp();
   </script>
