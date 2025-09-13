@@ -210,6 +210,17 @@
     }
   }
 
+  function load(collection, callback) {
+    // Realtime listener
+    return window.firebaseCollection(window.dbFirestore, collection).onSnapshot(snapshot => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Update localStorage for offline support
+      localStorage.setItem(collection, JSON.stringify(data));
+      // Send back to your UI
+      if (callback) callback(data);
+    });
+  }
+
 
   // --------------------
   // Auth (Custom using Firestore 'users' collection)
